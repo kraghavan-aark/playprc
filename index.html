@@ -900,35 +900,19 @@
           const crossOriginProvider = localStorage.getItem('playPRC_provider');
 
           if (crossOriginToken && crossOriginProvider === provider) {
-            // For same-domain tokens, validate with provider's API to detect logout
-            if (provider === 'descope') {
-              try {
-                // Validate token with Descope API
-                const validateResp = await fetch('https://api.descope.com/v1/auth/me', {
-                  headers: {
-                    'Authorization': `Bearer ${crossOriginToken}`
-                  }
-                });
-                hasSession = validateResp.ok;
-                console.log('Descope API token validation:', { hasSession, status: validateResp.status });
-              } catch (e) {
-                console.log('Descope API validation error:', e.message);
-                hasSession = false;
-              }
-            } else if (provider === 'auth0') {
-              try {
-                // Validate token with Auth0 API
-                const validateResp = await fetch(`https://${auth0Config.domain}/userinfo`, {
-                  headers: {
-                    'Authorization': `Bearer ${crossOriginToken}`
-                  }
-                });
-                hasSession = validateResp.ok;
-                console.log('Auth0 API token validation:', { hasSession, status: validateResp.status });
-              } catch (e) {
-                console.log('Auth0 API validation error:', e.message);
-                hasSession = false;
-              }
+            // For same-domain tokens, check if token still exists in localStorage
+            // If provider app (myprc-app) signed out, it clears localStorage
+            // This detects logout from the provider app
+            const currentToken = localStorage.getItem('playPRC_token');
+            if (currentToken) {
+              // Token still exists - check if it's expired
+              const decoded = decodeJWT(currentToken);
+              hasSession = !!(decoded && (!decoded.exp || decoded.exp > Date.now() / 1000));
+              console.log('Same-domain token check:', { hasSession, exp: decoded?.exp, now: Math.floor(Date.now() / 1000) });
+            } else {
+              // Token was cleared (provider logged out)
+              hasSession = false;
+              console.log('Token cleared - provider must have logged out');
             }
           } else if (provider === 'descope') {
             const user = await descopeSDK.me();
@@ -1057,6 +1041,21 @@
       document.getElementById('statusBar').classList.remove('dark-ui');
       startSessionPolling(s.type); // Start polling for saved session type
     })();
+
+    // ─── Listen for localStorage changes (logout from provider app) ──
+    window.addEventListener('storage', (e) => {
+      // If playPRC_token was removed, provider app signed out
+      if (e.key === 'playPRC_token' && e.newValue === null) {
+        console.log('Detected localStorage clear - provider app signed out');
+        stopSessionPolling();
+        clearSession();
+        document.getElementById('vHome').classList.add('v-hidden');
+        document.getElementById('vLogin').classList.remove('v-hidden');
+        document.getElementById('statusBar').classList.add('dark-ui');
+        showToast('Signed out from provider app');
+        currentAuthProvider = null;
+      }
+    });
 
     // ─── Descope Web Component Event Handler ──────────────────
     function setupDescopeListeners() {
