@@ -900,12 +900,36 @@
           const crossOriginProvider = localStorage.getItem('playPRC_provider');
 
           if (crossOriginToken && crossOriginProvider === provider) {
-            // For cross-origin tokens, just check if token is still valid (not expired)
-            // We trust the token since it came directly from the provider app
-            // (In the real webview scenario on the same origin, the SDK handles validation)
-            const decoded = decodeJWT(crossOriginToken);
-            hasSession = !!(decoded && (!decoded.exp || decoded.exp > Date.now() / 1000));
-            console.log('Cross-origin token check:', { hasSession, exp: decoded?.exp, now: Math.floor(Date.now() / 1000) });
+            // For same-domain tokens, validate with provider's API to detect logout
+            if (provider === 'descope') {
+              try {
+                // Validate token with Descope API
+                const validateResp = await fetch('https://api.descope.com/v1/auth/me', {
+                  headers: {
+                    'Authorization': `Bearer ${crossOriginToken}`
+                  }
+                });
+                hasSession = validateResp.ok;
+                console.log('Descope API token validation:', { hasSession, status: validateResp.status });
+              } catch (e) {
+                console.log('Descope API validation error:', e.message);
+                hasSession = false;
+              }
+            } else if (provider === 'auth0') {
+              try {
+                // Validate token with Auth0 API
+                const validateResp = await fetch(`https://${auth0Config.domain}/userinfo`, {
+                  headers: {
+                    'Authorization': `Bearer ${crossOriginToken}`
+                  }
+                });
+                hasSession = validateResp.ok;
+                console.log('Auth0 API token validation:', { hasSession, status: validateResp.status });
+              } catch (e) {
+                console.log('Auth0 API validation error:', e.message);
+                hasSession = false;
+              }
+            }
           } else if (provider === 'descope') {
             const user = await descopeSDK.me();
             hasSession = !!(user && user.ok !== false);
